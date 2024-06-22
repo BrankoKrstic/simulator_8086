@@ -1,5 +1,8 @@
 use std::{fmt::Display, io::Read};
 
+/// Logic for decoding 8086 instructions into assembly
+/// User Manual: https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
+
 #[derive(Debug)]
 pub enum Register {
     AL,
@@ -85,6 +88,7 @@ impl Display for Instruction {
 }
 
 fn decode_bytes(b1: u8, b2: u8) -> Instruction {
+    // User Manual page 161
     let opcode = b1 >> 2;
     let d = (b1 & 0b10) >> 1;
     let w = b1 & 0b1;
