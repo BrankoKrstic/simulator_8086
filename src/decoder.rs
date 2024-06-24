@@ -3,6 +3,8 @@ use std::{
     io::{self, Read},
 };
 
+static mut LABEL_COUNTER: usize = 0;
+
 /// Logic for decoding 8086 instructions into assembly
 /// User Manual: https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 
@@ -164,6 +166,10 @@ impl Display for Location {
 #[derive(Debug)]
 pub enum Instruction {
     Mov(Location, Location),
+    Add(Location, Location),
+    Sub(Location, Location),
+    Cmp(Location, Location),
+    Jump(&'static str, i8),
 }
 
 impl Display for Instruction {
@@ -172,6 +178,21 @@ impl Display for Instruction {
             Instruction::Mov(src, dest) => {
                 write!(f, "mov {}, {}", dest, src)
             }
+            Instruction::Add(src, dest) => write!(f, "add {}, {}", dest, src),
+            Instruction::Sub(src, dest) => write!(f, "sub {}, {}", dest, src),
+            Instruction::Cmp(src, dest) => write!(f, "cmp {}, {}", dest, src),
+            Instruction::Jump(instruction, disp) => write!(
+                f,
+                "{} label_{} ; {}",
+                instruction,
+                {
+                    unsafe {
+                        LABEL_COUNTER += 1;
+                        LABEL_COUNTER
+                    }
+                },
+                disp
+            ),
         }
     }
 }
@@ -222,31 +243,70 @@ impl<T: Read> Codec<T> {
         let b1 = self.get_byte()?;
         // User Manual page 161
         let prefix = b1 >> 4;
-        println!("{prefix}");
+        match b1 {
+            0b01110100 => return Some(Instruction::Jump("je", self.get_byte()? as i8)),
+            0b01111100 => return Some(Instruction::Jump("jl", self.get_byte()? as i8)),
+            0b01111110 => return Some(Instruction::Jump("jle", self.get_byte()? as i8)),
+            0b01110010 => return Some(Instruction::Jump("jb", self.get_byte()? as i8)),
+            0b01110110 => return Some(Instruction::Jump("jbe", self.get_byte()? as i8)),
+            0b01111010 => return Some(Instruction::Jump("jp", self.get_byte()? as i8)),
+            0b01110000 => return Some(Instruction::Jump("jo", self.get_byte()? as i8)),
+            0b01111000 => return Some(Instruction::Jump("js", self.get_byte()? as i8)),
+            0b01110101 => return Some(Instruction::Jump("jne", self.get_byte()? as i8)),
+            0b01111101 => return Some(Instruction::Jump("jnl", self.get_byte()? as i8)),
+            0b01111111 => return Some(Instruction::Jump("jnle", self.get_byte()? as i8)),
+            0b01110011 => return Some(Instruction::Jump("jnb", self.get_byte()? as i8)),
+            0b01110111 => return Some(Instruction::Jump("jnbe", self.get_byte()? as i8)),
+            0b01111011 => return Some(Instruction::Jump("jnp", self.get_byte()? as i8)),
+            0b01110001 => return Some(Instruction::Jump("jno", self.get_byte()? as i8)),
+            0b01111001 => return Some(Instruction::Jump("jns", self.get_byte()? as i8)),
+            0b11100010 => return Some(Instruction::Jump("loop", self.get_byte()? as i8)),
+            0b11100001 => return Some(Instruction::Jump("jnloopzs", self.get_byte()? as i8)),
+            0b11100000 => return Some(Instruction::Jump("loopnz", self.get_byte()? as i8)),
+            0b011100011 => return Some(Instruction::Jump("jcxz", self.get_byte()? as i8)),
+
+            _ => {}
+        }
         let instruction = match prefix {
             0b1011 => self.decode_immediate_to_register(b1),
-            0b1000 => self.decode_register_to_memory(b1),
+            0b1000 => {
+                if b1 >> 2 == 0b100000 {
+                    self.decode_arithmetic_immediate_to_register_memory(b1)
+                } else {
+                    self.decode_register_to_memory(b1)
+                }
+            }
             0b1100 => self.decode_immediate_to_register_memory(b1),
             0b1010 => self.decode_accumulator(b1),
+            0b0000 | 0b0010 | 0b0011 => {
+                if (b1 >> 2) & 1 == 1 {
+                    self.decode_arithmetic_immediate_to_accumulator(b1)
+                } else {
+                    self.decode_arithmetic_register_memory(b1)
+                }
+            }
+
             _ => unreachable!(),
         };
 
         Some(instruction)
     }
-
-    fn decode_accumulator(&mut self, b1: u8) -> Instruction {
-        let opcode = b1 >> 1;
-        let w = b1 & 1;
-        let displacement = match w {
+    fn generate_displacement_value(&mut self, w: u8) -> i16 {
+        match w {
             1 => {
                 let bytes = self.load_two().unwrap();
                 ((bytes.1 as i16) << 8) + bytes.0 as i16
             }
             0 => self.get_byte().unwrap() as i8 as i16,
             _ => unreachable!(),
-        };
+        }
+    }
+    fn decode_accumulator(&mut self, b1: u8) -> Instruction {
+        let opcode = b1 >> 1;
+        let w = b1 & 1;
+        let displacement = self.generate_displacement_value(w);
         let memory = Location::Memory(Memory::new(None, None, displacement));
-        let reg = Location::Register(Register::AX);
+        let reg = Location::Register(if w == 1 { Register::AX } else { Register::AL });
 
         if opcode == 0b1010000 {
             Instruction::Mov(memory, reg)
@@ -309,31 +369,90 @@ impl<T: Read> Codec<T> {
         Memory::new(right_reg1, right_reg2, displacement)
     }
 
-    fn decode_register_to_memory(&mut self, b1: u8) -> Instruction {
+    fn decode_register_to_memory_locations(&mut self, b1: u8) -> (Location, Location) {
         let b2 = self.get_byte().unwrap();
 
-        let opcode = b1 >> 2;
         let d = (b1 & 0b10) >> 1;
         let w = b1 & 0b1;
         let md = b2 >> 6; // mod
         let reg = (b2 >> 3) & 0b111;
         let rm = b2 & 0b111; // r/m
 
-        match (opcode, md, w) {
-            (0b100010, 0b11, w) => {
+        match (md, w) {
+            (0b11, w) => {
                 let r1 = Register::new(reg, w);
                 let r2 = Register::new(rm, w);
                 let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
-                Instruction::Mov(Location::Register(src), Location::Register(dest))
+                (Location::Register(src), Location::Register(dest))
             }
-            (0b100010, md, w) => {
+            (md, w) => {
                 let r1 = Location::Register(Register::new(reg, w));
 
                 let r2 = Location::Memory(self.get_memory_location(rm, md));
                 let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
-                Instruction::Mov(src, dest)
+                (src, dest)
             }
 
+            _ => unreachable!(),
+        }
+    }
+    fn decode_register_to_memory(&mut self, b1: u8) -> Instruction {
+        let (l1, l2) = self.decode_register_to_memory_locations(b1);
+        Instruction::Mov(l1, l2)
+    }
+    fn decode_arithmetic_register_memory(&mut self, b1: u8) -> Instruction {
+        let (l1, l2) = self.decode_register_to_memory_locations(b1);
+        let arithmetic_opcode = (b1 >> 3) & 0b111;
+        match arithmetic_opcode {
+            0b000 => Instruction::Add(l1, l2),
+            0b101 => Instruction::Sub(l1, l2),
+            0b111 => Instruction::Cmp(l1, l2),
+            _ => unreachable!(),
+        }
+    }
+    fn decode_arithmetic_immediate_to_register_memory(&mut self, b1: u8) -> Instruction {
+        let w = if b1 & 0b11 == 0b01 { 1 } else { 0 };
+
+        let b2 = self.get_byte().unwrap();
+        let md = b2 >> 6;
+        let rm = b2 & 0b111;
+
+        let memory = match md {
+            0b11 => {
+                let r2 = Register::new(rm, b1 & 1);
+
+                Location::Register(r2)
+            }
+            md => Location::Memory(self.get_memory_location(rm, md)),
+        };
+
+        let mut data = self.get_immediate_data(w);
+        if md != 0b11 {
+            data.w = Some(b1 & 1);
+        }
+        let immediate = Location::Immediate(data);
+
+        let arithmetic_opcode = (b2 >> 3) & 0b111;
+
+        match arithmetic_opcode {
+            0b000 => Instruction::Add(immediate, memory),
+            0b101 => Instruction::Sub(immediate, memory),
+            0b111 => Instruction::Cmp(immediate, memory),
+            _ => unreachable!(),
+        }
+    }
+
+    fn decode_arithmetic_immediate_to_accumulator(&mut self, b1: u8) -> Instruction {
+        let w = b1 & 1;
+        let displacement = self.generate_displacement_value(w);
+        let memory = Location::Memory(Memory::new(None, None, displacement));
+        let reg = Location::Register(if w == 1 { Register::AX } else { Register::AL });
+        let arithmetic_opcode = (b1 >> 3) & 0b111;
+
+        match arithmetic_opcode {
+            0b000 => Instruction::Add(memory, reg),
+            0b101 => Instruction::Sub(memory, reg),
+            0b111 => Instruction::Cmp(memory, reg),
             _ => unreachable!(),
         }
     }
