@@ -286,7 +286,7 @@ impl<T: Read> Codec<T> {
             0b11100010 => return Some(Instruction::Jump("loop", self.get_byte()? as i8)),
             0b11100001 => return Some(Instruction::Jump("jnloopzs", self.get_byte()? as i8)),
             0b11100000 => return Some(Instruction::Jump("loopnz", self.get_byte()? as i8)),
-            0b011100011 => return Some(Instruction::Jump("jcxz", self.get_byte()? as i8)),
+            0b11100011 => return Some(Instruction::Jump("jcxz", self.get_byte()? as i8)),
             0b00110111 => return Some(Instruction::Aaa),
             0b00100111 => return Some(Instruction::Daa),
 
