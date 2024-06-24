@@ -7,6 +7,13 @@ use std::{
 use simulator_8086::decoder::Codec;
 
 fn main() {
+    let mut i = 1;
+    let mut j = 2;
+    match i.cmp(&j) {
+        std::cmp::Ordering::Less => todo!(),
+        std::cmp::Ordering::Equal => todo!(),
+        std::cmp::Ordering::Greater => todo!(),
+    }
     let args: Vec<String> = std::env::args().collect();
     if let Err(e) = run(&args[1]) {
         eprint!("An error occurred {}", e);

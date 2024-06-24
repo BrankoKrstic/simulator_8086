@@ -1,4 +1,7 @@
-use std::{fmt::Display, io::Read};
+use std::{
+    fmt::Display,
+    io::{self, Read},
+};
 
 /// Logic for decoding 8086 instructions into assembly
 /// User Manual: https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
@@ -87,45 +90,89 @@ impl Display for Instruction {
     }
 }
 
-fn decode_bytes(b1: u8, b2: u8) -> Instruction {
-    // User Manual page 161
-    let opcode = b1 >> 2;
-    let d = (b1 & 0b10) >> 1;
-    let w = b1 & 0b1;
-    let md = b2 >> 6; // mod
-    let reg = (b2 >> 3) & 0b111;
-    let rm = b2 & 0b111; // r/m
-
-    match (opcode, md) {
-        (0b100010, 0b11) => {
-            let r1 = Register::new(reg, w);
-            let r2 = Register::new(rm, w);
-            let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
-            Instruction::MovRegisters { src, dest }
-        }
-        _ => unimplemented!(),
-    }
-}
-
 pub struct Codec<T> {
     source: T,
-    buf: Vec<u8>,
+    buf: [u8; 1024],
+    len: usize,
+    cur_byte: usize,
 }
 
 impl<T: Read> Codec<T> {
     pub fn new(source: T) -> Self {
         Self {
             source,
-            buf: vec![0u8; 2],
+            buf: [0u8; 1024],
+            len: 0,
+            cur_byte: 0,
         }
     }
-    pub fn next_opcode(&mut self) -> Option<Instruction> {
-        self.source.read_exact(&mut self.buf[0..2]).ok()?;
-        Some(decode_bytes(self.buf[0], self.buf[1]))
+    fn load_bytes(&mut self) -> Result<(), io::Error> {
+        let read = self.source.read(&mut self.buf[..])?;
+
+        self.cur_byte = 0;
+        self.len = read;
+        Ok(())
+    }
+    pub fn get_byte(&mut self) -> Option<u8> {
+        if self.cur_byte >= self.len {
+            self.load_bytes().ok()?;
+        }
+        if self.len == 0 {
+            return None;
+        }
+        let byte = self.buf[self.cur_byte];
+        self.cur_byte += 1;
+        Some(byte)
+    }
+    pub fn load_two(&mut self) -> Option<(u8, u8)> {
+        Some((self.get_byte()?, self.get_byte()?))
     }
 
     pub fn decode_all(self) -> Vec<Instruction> {
         self.into_iter().collect()
+    }
+
+    fn next_opcode(&mut self) -> Option<Instruction> {
+        let (b1, b2) = self.load_two()?;
+        // User Manual page 161
+        let opcode = b1 >> 2;
+        let d = (b1 & 0b10) >> 1;
+        let w = b1 & 0b1;
+        let md = b2 >> 6; // mod
+        let reg = (b2 >> 3) & 0b111;
+        let rm = b2 & 0b111; // r/m
+        println!("{} {}", b1, b2);
+        let instruction = match (opcode, md, w) {
+            (0b100010, 0b11, w) => {
+                let r1 = Register::new(reg, w);
+                let r2 = Register::new(rm, w);
+                let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
+                Instruction::MovRegisters { src, dest }
+            }
+            (0b100010, x, w) => {
+                // no displacement
+                let r1 = Register::new(reg, w);
+                let r2 = Register::new(rm, w);
+                let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
+                Instruction::MovRegisters { src, dest }
+            }
+            (0b100010, 0b01, 2) => {
+                // 8-bit displacement
+                let r1 = Register::new(reg, w);
+                let r2 = Register::new(rm, w);
+                let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
+                Instruction::MovRegisters { src, dest }
+            }
+            (0b100010, 0b00, 2) => {
+                // 16-bit displacement
+                let r1 = Register::new(reg, w);
+                let r2 = Register::new(rm, w);
+                let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
+                Instruction::MovRegisters { src, dest }
+            }
+            _ => unimplemented!(),
+        };
+        Some(instruction)
     }
 }
 
