@@ -79,11 +79,11 @@ impl Register {
 pub struct Memory {
     reg1: Option<Register>,
     reg2: Option<Register>,
-    displacement: u16,
+    displacement: i16,
 }
 
 impl Memory {
-    fn new(reg1: Option<Register>, reg2: Option<Register>, displacement: u16) -> Self {
+    fn new(reg1: Option<Register>, reg2: Option<Register>, displacement: i16) -> Self {
         Self {
             reg1,
             reg2,
@@ -96,9 +96,21 @@ impl Display for Memory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match (self.reg1.as_ref(), self.reg2.as_ref(), self.displacement) {
             (Some(reg1), Some(reg2), 0) => write!(f, "[{} + {}]", reg1, reg2),
-            (Some(reg1), Some(reg2), x) => write!(f, "[{} + {} + {}]", reg1, reg2, x),
+            (Some(reg1), Some(reg2), x) => {
+                if x > 0 {
+                    write!(f, "[{} + {} + {}]", reg1, reg2, x)
+                } else {
+                    write!(f, "[{} + {} - {}]", reg1, reg2, x.abs())
+                }
+            }
             (Some(reg1), None, 0) => write!(f, "[{}]", reg1),
-            (Some(reg1), None, x) => write!(f, "[{} + {}]", reg1, x),
+            (Some(reg1), None, x) => {
+                if x > 0 {
+                    write!(f, "[{} + {}]", reg1, x)
+                } else {
+                    write!(f, "[{} - {}]", reg1, x.abs())
+                }
+            }
             (_, _, x) => {
                 write!(f, "[{}]", x)
             }
@@ -107,42 +119,51 @@ impl Display for Memory {
 }
 
 #[derive(Debug)]
-struct Immediate {
-    data: u16,
+pub struct Immediate {
+    data: i16,
+    w: Option<u8>,
 }
 
 impl Display for Immediate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.data)
+        if let Some(w) = &self.w {
+            if *w == 1 {
+                write!(f, "word {}", self.data)
+            } else {
+                write!(f, "byte {}", self.data)
+            }
+        } else {
+            write!(f, "{}", self.data)
+        }
     }
 }
 
 impl Immediate {
-    fn new(data: u16) -> Self {
-        Self { data }
+    fn new(data: i16, w: Option<u8>) -> Self {
+        Self { data, w }
     }
 }
 
 #[derive(Debug)]
-pub enum Copy {
+pub enum Location {
     Register(Register),
     Memory(Memory),
     Immediate(Immediate),
 }
 
-impl Display for Copy {
+impl Display for Location {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Copy::Register(x) => write!(f, "{}", x),
-            Copy::Memory(x) => write!(f, "{}", x),
-            Copy::Immediate(x) => write!(f, "{}", x),
+            Location::Register(x) => write!(f, "{}", x),
+            Location::Memory(x) => write!(f, "{}", x),
+            Location::Immediate(x) => write!(f, "{}", x),
         }
     }
 }
 
 #[derive(Debug)]
 pub enum Instruction {
-    Mov(Copy, Copy),
+    Mov(Location, Location),
 }
 
 impl Display for Instruction {
@@ -200,28 +221,92 @@ impl<T: Read> Codec<T> {
     fn next_opcode(&mut self) -> Option<Instruction> {
         let b1 = self.get_byte()?;
         // User Manual page 161
-        let opcode = b1 >> 2;
-        let prefix = opcode >> 2;
-        println!("next");
-        println!("{:#b} {:#b}", prefix, opcode);
-        let instruction = match (prefix, opcode) {
-            (0b1011, _) => self.decode_immediate_to_register(b1),
-            (_, 0b100010) => self.decode_register_to_memory(b1),
+        let prefix = b1 >> 4;
+        println!("{prefix}");
+        let instruction = match prefix {
+            0b1011 => self.decode_immediate_to_register(b1),
+            0b1000 => self.decode_register_to_memory(b1),
+            0b1100 => self.decode_immediate_to_register_memory(b1),
+            0b1010 => self.decode_accumulator(b1),
             _ => unreachable!(),
         };
 
         Some(instruction)
     }
+
+    fn decode_accumulator(&mut self, b1: u8) -> Instruction {
+        let opcode = b1 >> 1;
+        let w = b1 & 1;
+        let displacement = match w {
+            1 => {
+                let bytes = self.load_two().unwrap();
+                ((bytes.1 as i16) << 8) + bytes.0 as i16
+            }
+            0 => self.get_byte().unwrap() as i8 as i16,
+            _ => unreachable!(),
+        };
+        let memory = Location::Memory(Memory::new(None, None, displacement));
+        let reg = Location::Register(Register::AX);
+
+        if opcode == 0b1010000 {
+            Instruction::Mov(memory, reg)
+        } else {
+            Instruction::Mov(reg, memory)
+        }
+    }
+    fn get_immediate_data(&mut self, w: u8) -> Immediate {
+        let data = if w == 1 {
+            let bytes = self.load_two().unwrap();
+            ((bytes.1 as i16) << 8) + bytes.0 as i16
+        } else {
+            self.get_byte().unwrap() as i8 as i16
+        };
+        Immediate::new(data, None)
+    }
     fn decode_immediate_to_register(&mut self, b1: u8) -> Instruction {
         let w = (b1 >> 3) & 1;
         let reg = Register::new(b1 & 0b111, w);
-        let data = if w == 1 {
-            let bytes = self.load_two().unwrap();
-            ((bytes.1 as u16) << 8) + bytes.0 as u16
-        } else {
-            self.get_byte().unwrap() as u16
+        let immediate = self.get_immediate_data(w);
+        Instruction::Mov(Location::Immediate(immediate), Location::Register(reg))
+    }
+
+    fn decode_immediate_to_register_memory(&mut self, b1: u8) -> Instruction {
+        let w = b1 & 1;
+
+        let b2 = self.get_byte().unwrap();
+        let md = b2 >> 6;
+        let rm = b2 & 0b111;
+
+        let memory = self.get_memory_location(rm, md);
+        let mut immediate = self.get_immediate_data(w);
+        immediate.w = Some(w);
+        Instruction::Mov(Location::Immediate(immediate), Location::Memory(memory))
+    }
+
+    fn get_memory_location(&mut self, rm: u8, md: u8) -> Memory {
+        let displacement = match (md, rm) {
+            (0b10, _) | (0b00, 0b110) => {
+                let bytes = self.load_two().unwrap();
+                ((bytes.1 as i16) << 8) + bytes.0 as i16
+            }
+            (0b01, _) => self.get_byte().unwrap() as i8 as i16,
+            _ => 0i16,
         };
-        Instruction::Mov(Copy::Immediate(Immediate::new(data)), Copy::Register(reg))
+
+        let (right_reg1, right_reg2) = match (rm, md) {
+            (0b110, 0b00) => (None, None),
+            (0b000, _) => (Some(Register::BX), Some(Register::SI)),
+            (0b001, _) => (Some(Register::BX), Some(Register::DI)),
+            (0b010, _) => (Some(Register::BP), Some(Register::SI)),
+            (0b011, _) => (Some(Register::BP), Some(Register::DI)),
+            (0b100, _) => (Some(Register::SI), None),
+            (0b101, _) => (Some(Register::DI), None),
+            (0b110, _) => (Some(Register::BP), None),
+            (0b111, _) => (Some(Register::BX), None),
+
+            _ => unreachable!(),
+        };
+        Memory::new(right_reg1, right_reg2, displacement)
     }
 
     fn decode_register_to_memory(&mut self, b1: u8) -> Instruction {
@@ -239,39 +324,16 @@ impl<T: Read> Codec<T> {
                 let r1 = Register::new(reg, w);
                 let r2 = Register::new(rm, w);
                 let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
-                Instruction::Mov(Copy::Register(src), Copy::Register(dest))
+                Instruction::Mov(Location::Register(src), Location::Register(dest))
             }
             (0b100010, md, w) => {
-                let r1 = Register::new(reg, w);
+                let r1 = Location::Register(Register::new(reg, w));
 
-                let displacement = match (md, rm) {
-                    (0b10, _) | (0b00, 0b110) => {
-                        let bytes = self.load_two().unwrap();
-                        ((bytes.1 as u16) << 8) + bytes.0 as u16
-                    }
-                    (0b01, _) => self.get_byte().unwrap() as u16,
-                    _ => 0u16,
-                };
-
-                let (right_reg1, right_reg2) = match (rm, md) {
-                    (0b110, 0b00) => (None, None),
-                    (0b000, _) => (Some(Register::BX), Some(Register::SI)),
-                    (0b001, _) => (Some(Register::BX), Some(Register::DI)),
-                    (0b010, _) => (Some(Register::BP), Some(Register::SI)),
-                    (0b011, _) => (Some(Register::BP), Some(Register::DI)),
-                    (0b100, _) => (Some(Register::SI), None),
-                    (0b101, _) => (Some(Register::DI), None),
-                    (0b110, _) => (Some(Register::BP), None),
-                    (0b111, _) => (Some(Register::BX), None),
-
-                    _ => unreachable!(),
-                };
-
-                let r2 = Copy::Memory(Memory::new(right_reg1, right_reg2, displacement));
-                let r1 = Copy::Register(r1);
+                let r2 = Location::Memory(self.get_memory_location(rm, md));
                 let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
                 Instruction::Mov(src, dest)
             }
+
             _ => unreachable!(),
         }
     }
