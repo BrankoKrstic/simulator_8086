@@ -167,9 +167,15 @@ impl Display for Location {
 pub enum Instruction {
     Mov(Location, Location),
     Add(Location, Location),
+    Adc(Location, Location),
+    Sbb(Location, Location),
     Sub(Location, Location),
     Cmp(Location, Location),
     Jump(&'static str, i8),
+    Daa,
+    Aaa,
+    Inc(Location, Option<u8>),
+    Dec(Location, Option<u8>),
 }
 
 impl Display for Instruction {
@@ -179,6 +185,8 @@ impl Display for Instruction {
                 write!(f, "mov {}, {}", dest, src)
             }
             Instruction::Add(src, dest) => write!(f, "add {}, {}", dest, src),
+            Instruction::Adc(src, dest) => write!(f, "adc {}, {}", dest, src),
+            Instruction::Sbb(src, dest) => write!(f, "sbb {}, {}", dest, src),
             Instruction::Sub(src, dest) => write!(f, "sub {}, {}", dest, src),
             Instruction::Cmp(src, dest) => write!(f, "cmp {}, {}", dest, src),
             Instruction::Jump(instruction, disp) => write!(
@@ -193,6 +201,22 @@ impl Display for Instruction {
                 },
                 disp
             ),
+            Instruction::Daa => write!(f, "daa"),
+            Instruction::Aaa => write!(f, "aaa"),
+            Instruction::Inc(dest, amount) => {
+                if let Some(amount) = amount {
+                    write!(f, "inc {}, {}", dest, amount)
+                } else {
+                    write!(f, "inc {}", dest)
+                }
+            }
+            Instruction::Dec(dest, amount) => {
+                if let Some(amount) = amount {
+                    write!(f, "dec {}, {}", dest, amount)
+                } else {
+                    write!(f, "dec {}", dest)
+                }
+            }
         }
     }
 }
@@ -242,7 +266,6 @@ impl<T: Read> Codec<T> {
     fn next_opcode(&mut self) -> Option<Instruction> {
         let b1 = self.get_byte()?;
         // User Manual page 161
-        let prefix = b1 >> 4;
         match b1 {
             0b01110100 => return Some(Instruction::Jump("je", self.get_byte()? as i8)),
             0b01111100 => return Some(Instruction::Jump("jl", self.get_byte()? as i8)),
@@ -264,9 +287,14 @@ impl<T: Read> Codec<T> {
             0b11100001 => return Some(Instruction::Jump("jnloopzs", self.get_byte()? as i8)),
             0b11100000 => return Some(Instruction::Jump("loopnz", self.get_byte()? as i8)),
             0b011100011 => return Some(Instruction::Jump("jcxz", self.get_byte()? as i8)),
+            0b00110111 => return Some(Instruction::Aaa),
+            0b00100111 => return Some(Instruction::Daa),
 
             _ => {}
         }
+
+        let prefix = b1 >> 4;
+
         let instruction = match prefix {
             0b1011 => self.decode_immediate_to_register(b1),
             0b1000 => {
@@ -285,7 +313,13 @@ impl<T: Read> Codec<T> {
                     self.decode_arithmetic_register_memory(b1)
                 }
             }
-
+            0b0100 => {
+                if (b1 >> 3) & 1 == 1 {
+                    Instruction::Dec(Location::Register(Register::new(b1 & 0b111, 1)), None)
+                } else {
+                    Instruction::Inc(Location::Register(Register::new(b1 & 0b111, 1)), None)
+                }
+            }
             _ => unreachable!(),
         };
 
@@ -392,8 +426,6 @@ impl<T: Read> Codec<T> {
                 let (src, dest) = if d == 1 { (r2, r1) } else { (r1, r2) };
                 (src, dest)
             }
-
-            _ => unreachable!(),
         }
     }
     fn decode_register_to_memory(&mut self, b1: u8) -> Instruction {
