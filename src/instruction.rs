@@ -20,6 +20,9 @@ pub enum Register {
     BP,
     SI,
     DI,
+    SS,
+    DS,
+    ES,
 }
 
 impl Display for Register {
@@ -41,6 +44,9 @@ impl Display for Register {
             Register::BP => "bp",
             Register::SI => "si",
             Register::DI => "di",
+            Register::SS => "ss",
+            Register::DS => "ds",
+            Register::ES => "es",
         };
         write!(f, "{}", display)
     }
@@ -116,8 +122,8 @@ impl Display for Memory {
 
 #[derive(Debug)]
 pub struct Immediate {
-    data: i16,
-    w: Option<u8>,
+    pub data: i16,
+    pub w: Option<u8>,
 }
 
 impl Display for Immediate {

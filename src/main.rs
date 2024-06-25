@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use simulator_8086::decoder::Codec;
+use simulator_8086::{cpu::Cpu, decoder::Codec};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -15,6 +15,7 @@ fn main() {
 }
 
 fn run(path: impl AsRef<Path>) -> Result<(), std::io::Error> {
+    let mut cpu = Cpu::new();
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -28,7 +29,9 @@ fn run(path: impl AsRef<Path>) -> Result<(), std::io::Error> {
     for code in c {
         writer.write_all(code.to_string().as_bytes())?;
         writer.write_all(b"\n")?;
+        cpu.execute_instruction(code);
     }
+    cpu.print_registers();
 
     Ok(())
 }
