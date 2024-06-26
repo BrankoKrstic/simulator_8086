@@ -1,6 +1,9 @@
-use std::io::BufRead;
+use std::io::{BufRead, Seek};
 
-use crate::instruction::{Instruction, Location, Register};
+use crate::{
+    decoder::Codec,
+    instruction::{Instruction, JumpType, Location, Register},
+};
 
 enum Bits {
     High,
@@ -8,8 +11,10 @@ enum Bits {
     All,
 }
 
-#[derive(Default)]
-pub struct Cpu<T> {
+pub struct Cpu<T>
+where
+    T: BufRead,
+{
     /// 0: ax
     /// 1: bx
     /// 2: cx
@@ -22,18 +27,23 @@ pub struct Cpu<T> {
     /// 9: ds
     /// 10: es
     registers: [u16; 11],
-    instructions: T,
+    instructions: Codec<T>,
     sf: bool,
     zf: bool,
 }
 
-impl<T: BufRead> Cpu<T> {
+impl<T: BufRead + Seek> Cpu<T> {
     pub fn new(instructions: T) -> Self {
         Self {
             registers: [0; 11],
-            instructions,
+            instructions: Codec::new(instructions),
             sf: false,
             zf: false,
+        }
+    }
+    pub fn run(&mut self) {
+        while let Some(instruction) = self.instructions.next_op() {
+            self.execute_instruction(instruction);
         }
     }
     pub fn execute_instruction(&mut self, instruction: Instruction) {
@@ -44,7 +54,7 @@ impl<T: BufRead> Cpu<T> {
             Instruction::Sbb(_, _) => todo!(),
             Instruction::Sub(src, dest) => self.execute_sub(src, dest),
             Instruction::Cmp(src, dest) => self.execute_cmp(src, dest),
-            Instruction::Jump(_, _) => todo!(),
+            Instruction::Jump(ty, offset) => self.execute_jump(ty, offset),
             Instruction::Daa => todo!(),
             Instruction::Aaa => todo!(),
             Instruction::Inc(_, _) => todo!(),
@@ -168,5 +178,34 @@ impl<T: BufRead> Cpu<T> {
             print!("S");
         }
         println!();
+    }
+
+    fn execute_jump(&mut self, ty: JumpType, offset: i8) {
+        println!("{} {}", ty, offset);
+        let should_jump = match ty {
+            JumpType::Je => todo!(),
+            JumpType::Jl => todo!(),
+            JumpType::Jle => todo!(),
+            JumpType::Jb => todo!(),
+            JumpType::Jbe => todo!(),
+            JumpType::Jp => todo!(),
+            JumpType::Jo => todo!(),
+            JumpType::Js => todo!(),
+            JumpType::Jne => !self.zf,
+            JumpType::Jnl => todo!(),
+            JumpType::Jnle => todo!(),
+            JumpType::Jnb => todo!(),
+            JumpType::Jnbe => todo!(),
+            JumpType::Jnp => todo!(),
+            JumpType::Jno => todo!(),
+            JumpType::Jns => todo!(),
+            JumpType::Loop => todo!(),
+            JumpType::Jnloopzs => todo!(),
+            JumpType::Loopnz => todo!(),
+            JumpType::Jcxz => todo!(),
+        };
+        if should_jump {
+            self.instructions.jump(offset);
+        }
     }
 }

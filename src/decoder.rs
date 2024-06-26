@@ -1,79 +1,71 @@
-use std::io::{self, Read};
+use std::io::{BufRead, Seek, SeekFrom};
 
-use crate::instruction::{Immediate, Instruction, Location, Memory, Register};
+use crate::instruction::{Immediate, Instruction, JumpType, Location, Memory, Register};
 
 /// Logic for decoding 8086 instructions into assembly
 /// User Manual: https://edge.edx.org/c4x/BITSPilani/EEE231/asset/8086_family_Users_Manual_1_.pdf
 
 pub struct Codec<T> {
     source: T,
-    buf: [u8; 1024],
-    len: usize,
-    cur_byte: usize,
 }
 
-impl<T: Read> Codec<T> {
+impl<T: BufRead + Seek> Codec<T> {
     pub fn new(source: T) -> Self {
-        Self {
-            source,
-            buf: [0u8; 1024],
-            len: 0,
-            cur_byte: 0,
-        }
+        Self { source }
     }
-    fn load_bytes(&mut self) -> Result<(), io::Error> {
-        let read = self.source.read(&mut self.buf[..])?;
 
-        self.cur_byte = 0;
-        self.len = read;
-        Ok(())
-    }
     pub fn get_byte(&mut self) -> Option<u8> {
-        if self.cur_byte >= self.len {
-            self.load_bytes().ok()?;
-        }
-        if self.len == 0 {
-            return None;
-        }
-        let byte = self.buf[self.cur_byte];
-        self.cur_byte += 1;
-        Some(byte)
+        let mut buf = [0; 1];
+        self.source.read_exact(&mut buf).ok()?;
+        Some(buf[0])
     }
     pub fn load_two(&mut self) -> Option<(u8, u8)> {
-        Some((self.get_byte()?, self.get_byte()?))
+        let mut buf = [0; 2];
+        self.source.read_exact(&mut buf).ok()?;
+        Some((buf[0], buf[1]))
     }
 
     pub fn decode_all(self) -> Vec<Instruction> {
         self.into_iter().collect()
     }
 
-    fn next_opcode(&mut self) -> Option<Instruction> {
+    pub fn jump(&mut self, bytes: i8) {
+        let pos = SeekFrom::Current(bytes as i64);
+        let new_pos = self.source.seek(pos).unwrap();
+        println!("{} {}", bytes as i64, new_pos);
+    }
+
+    pub fn next_op(&mut self) -> Option<Instruction> {
         let b1 = self.get_byte()?;
         // User Manual page 161
         match b1 {
-            0b01110100 => return Some(Instruction::Jump("je", self.get_byte()? as i8)),
-            0b01111100 => return Some(Instruction::Jump("jl", self.get_byte()? as i8)),
-            0b01111110 => return Some(Instruction::Jump("jle", self.get_byte()? as i8)),
-            0b01110010 => return Some(Instruction::Jump("jb", self.get_byte()? as i8)),
-            0b01110110 => return Some(Instruction::Jump("jbe", self.get_byte()? as i8)),
-            0b01111010 => return Some(Instruction::Jump("jp", self.get_byte()? as i8)),
-            0b01110000 => return Some(Instruction::Jump("jo", self.get_byte()? as i8)),
-            0b01111000 => return Some(Instruction::Jump("js", self.get_byte()? as i8)),
-            0b01110101 => return Some(Instruction::Jump("jne", self.get_byte()? as i8)),
-            0b01111101 => return Some(Instruction::Jump("jnl", self.get_byte()? as i8)),
-            0b01111111 => return Some(Instruction::Jump("jnle", self.get_byte()? as i8)),
-            0b01110011 => return Some(Instruction::Jump("jnb", self.get_byte()? as i8)),
-            0b01110111 => return Some(Instruction::Jump("jnbe", self.get_byte()? as i8)),
-            0b01111011 => return Some(Instruction::Jump("jnp", self.get_byte()? as i8)),
-            0b01110001 => return Some(Instruction::Jump("jno", self.get_byte()? as i8)),
-            0b01111001 => return Some(Instruction::Jump("jns", self.get_byte()? as i8)),
-            0b11100010 => return Some(Instruction::Jump("loop", self.get_byte()? as i8)),
-            0b11100001 => return Some(Instruction::Jump("jnloopzs", self.get_byte()? as i8)),
-            0b11100000 => return Some(Instruction::Jump("loopnz", self.get_byte()? as i8)),
-            0b11100011 => return Some(Instruction::Jump("jcxz", self.get_byte()? as i8)),
+            0b01110100 => return Some(Instruction::Jump(JumpType::Je, self.get_byte()? as i8)),
+            0b01111100 => return Some(Instruction::Jump(JumpType::Jl, self.get_byte()? as i8)),
+            0b01111110 => return Some(Instruction::Jump(JumpType::Jle, self.get_byte()? as i8)),
+            0b01110010 => return Some(Instruction::Jump(JumpType::Jb, self.get_byte()? as i8)),
+            0b01110110 => return Some(Instruction::Jump(JumpType::Jbe, self.get_byte()? as i8)),
+            0b01111010 => return Some(Instruction::Jump(JumpType::Jp, self.get_byte()? as i8)),
+            0b01110000 => return Some(Instruction::Jump(JumpType::Jo, self.get_byte()? as i8)),
+            0b01111000 => return Some(Instruction::Jump(JumpType::Js, self.get_byte()? as i8)),
+            0b01110101 => return Some(Instruction::Jump(JumpType::Jne, self.get_byte()? as i8)),
+            0b01111101 => return Some(Instruction::Jump(JumpType::Jnl, self.get_byte()? as i8)),
+            0b01111111 => return Some(Instruction::Jump(JumpType::Jnle, self.get_byte()? as i8)),
+            0b01110011 => return Some(Instruction::Jump(JumpType::Jnb, self.get_byte()? as i8)),
+            0b01110111 => return Some(Instruction::Jump(JumpType::Jnbe, self.get_byte()? as i8)),
+            0b01111011 => return Some(Instruction::Jump(JumpType::Jnp, self.get_byte()? as i8)),
+            0b01110001 => return Some(Instruction::Jump(JumpType::Jno, self.get_byte()? as i8)),
+            0b01111001 => return Some(Instruction::Jump(JumpType::Jns, self.get_byte()? as i8)),
+            0b11100010 => return Some(Instruction::Jump(JumpType::Loop, self.get_byte()? as i8)),
+            0b11100001 => {
+                return Some(Instruction::Jump(
+                    JumpType::Jnloopzs,
+                    self.get_byte()? as i8,
+                ))
+            }
+            0b11100000 => return Some(Instruction::Jump(JumpType::Loopnz, self.get_byte()? as i8)),
+            0b11100011 => return Some(Instruction::Jump(JumpType::Jcxz, self.get_byte()? as i8)),
             0b00110111 => return Some(Instruction::Aaa),
             0b00100111 => return Some(Instruction::Daa),
-
             _ => {}
         }
 
@@ -274,7 +266,7 @@ impl<T: Read> Codec<T> {
     }
 }
 
-impl<T: Read> IntoIterator for Codec<T> {
+impl<T: BufRead + Seek> IntoIterator for Codec<T> {
     type Item = Instruction;
 
     type IntoIter = InstructionIterator<T>;
@@ -288,10 +280,10 @@ pub struct InstructionIterator<T> {
     codec: Codec<T>,
 }
 
-impl<T: Read> Iterator for InstructionIterator<T> {
+impl<T: BufRead + Seek> Iterator for InstructionIterator<T> {
     type Item = Instruction;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.codec.next_opcode()
+        self.codec.next_op()
     }
 }

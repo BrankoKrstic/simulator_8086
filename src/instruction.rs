@@ -174,7 +174,7 @@ pub enum Instruction {
     Sbb(Location, Location),
     Sub(Location, Location),
     Cmp(Location, Location),
-    Jump(&'static str, i8),
+    Jump(JumpType, i8),
     Daa,
     Aaa,
     Inc(Location, Option<u8>),
@@ -221,5 +221,57 @@ impl Display for Instruction {
                 }
             }
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum JumpType {
+    Je,
+    Jl,
+    Jle,
+    Jb,
+    Jbe,
+    Jp,
+    Jo,
+    Js,
+    Jne,
+    Jnl,
+    Jnle,
+    Jnb,
+    Jnbe,
+    Jnp,
+    Jno,
+    Jns,
+    Loop,
+    Jnloopzs,
+    Loopnz,
+    Jcxz,
+}
+
+impl Display for JumpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let out = match self {
+            JumpType::Je => "je",
+            JumpType::Jl => "jl",
+            JumpType::Jle => "jle",
+            JumpType::Jb => "jb",
+            JumpType::Jbe => "jbe",
+            JumpType::Jp => "jp",
+            JumpType::Jo => "jo",
+            JumpType::Js => "js",
+            JumpType::Jne => "jne",
+            JumpType::Jnl => "jnl",
+            JumpType::Jnle => "jnle",
+            JumpType::Jnb => "jnb",
+            JumpType::Jnbe => "jnbe",
+            JumpType::Jnp => "jnp",
+            JumpType::Jno => "jno",
+            JumpType::Jns => "jns",
+            JumpType::Loop => "loop",
+            JumpType::Jnloopzs => "jnloopzs",
+            JumpType::Loopnz => "loopnz",
+            JumpType::Jcxz => "jcxz",
+        };
+        write!(f, "{}", out)
     }
 }
