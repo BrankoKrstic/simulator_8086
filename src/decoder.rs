@@ -32,7 +32,6 @@ impl<T: BufRead + Seek> Codec<T> {
     pub fn jump(&mut self, bytes: i8) {
         let pos = SeekFrom::Current(bytes as i64);
         let new_pos = self.source.seek(pos).unwrap();
-        println!("{} {}", bytes as i64, new_pos);
     }
 
     pub fn next_op(&mut self) -> Option<Instruction> {
@@ -222,8 +221,6 @@ impl<T: BufRead + Seek> Codec<T> {
         let w = if b1 & 0b11 == 0b01 { 1 } else { 0 };
 
         let b2 = self.get_byte().unwrap();
-
-        println!("{:#010b} {:#010b}", b1, b2);
 
         let md = b2 >> 6;
         let rm = b2 & 0b111;

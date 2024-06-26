@@ -188,7 +188,6 @@ impl<T: BufRead + Seek> Cpu<T> {
     }
 
     fn execute_jump(&mut self, ty: JumpType, offset: i8) {
-        println!("{} {}", ty, offset);
         let should_jump = match ty {
             JumpType::Je => self.zf,
             JumpType::Jl => todo!(),
