@@ -1,3 +1,5 @@
+use std::io::BufRead;
+
 use crate::instruction::{Instruction, Location, Register};
 
 enum Bits {
@@ -7,7 +9,7 @@ enum Bits {
 }
 
 #[derive(Default)]
-pub struct Cpu {
+pub struct Cpu<T> {
     /// 0: ax
     /// 1: bx
     /// 2: cx
@@ -19,22 +21,29 @@ pub struct Cpu {
     /// 8: ss
     /// 9: ds
     /// 10: es
-    ///
     registers: [u16; 11],
+    instructions: T,
+    sf: bool,
+    zf: bool,
 }
 
-impl Cpu {
-    pub fn new() -> Self {
-        Self { registers: [0; 11] }
+impl<T: BufRead> Cpu<T> {
+    pub fn new(instructions: T) -> Self {
+        Self {
+            registers: [0; 11],
+            instructions,
+            sf: false,
+            zf: false,
+        }
     }
     pub fn execute_instruction(&mut self, instruction: Instruction) {
         match instruction {
             Instruction::Mov(src, dest) => self.execute_mov(src, dest),
-            Instruction::Add(_, _) => todo!(),
+            Instruction::Add(src, dest) => self.execute_add(src, dest),
             Instruction::Adc(_, _) => todo!(),
             Instruction::Sbb(_, _) => todo!(),
-            Instruction::Sub(_, _) => todo!(),
-            Instruction::Cmp(_, _) => todo!(),
+            Instruction::Sub(src, dest) => self.execute_sub(src, dest),
+            Instruction::Cmp(src, dest) => self.execute_cmp(src, dest),
             Instruction::Jump(_, _) => todo!(),
             Instruction::Daa => todo!(),
             Instruction::Aaa => todo!(),
@@ -42,7 +51,7 @@ impl Cpu {
             Instruction::Dec(_, _) => todo!(),
         }
     }
-    fn execute_mov(&mut self, src: Location, dest: Location) {
+    fn get_location(&mut self, src: &Location, dest: &Location) -> (u16, &mut u16, Bits) {
         let val = match src {
             Location::Register(ref reg) => {
                 let (reg, w) = self.decode_register(reg);
@@ -61,14 +70,57 @@ impl Cpu {
             Location::Memory(_) => todo!(),
             Location::Immediate(_) => unimplemented!(),
         };
+        (val, mov_to, w)
+    }
+    fn execute_mov(&mut self, src: Location, dest: Location) {
+        let (val, mov_to, w) = self.get_location(&src, &dest);
         let val_to_mov = match w {
             Bits::High => (val << 8) | (*mov_to & 0xFF),
             Bits::Low => (val & 0xFF) | (*mov_to & 0xFF00),
             Bits::All => val,
         };
 
-        println!("{}: {:#06x}->{:#06x}", dest, *mov_to, val_to_mov);
+        println!("mov {}: {:#06x}->{:#06x}", dest, *mov_to, val_to_mov);
         *mov_to = val_to_mov;
+    }
+    fn execute_add(&mut self, src: Location, dest: Location) {
+        let (val, to, w) = self.get_location(&src, &dest);
+        let result = match w {
+            Bits::High => (val << 8) + (*to & 0xFF),
+            _ => val + *to,
+        };
+        *to = result;
+        print!("add {}: {:#06x}->{:#06x} ", dest, *to, result);
+
+        self.set_flags(result);
+        self.print_flags();
+    }
+    fn execute_sub(&mut self, src: Location, dest: Location) {
+        let (val, to, w) = self.get_location(&src, &dest);
+        let result = match w {
+            Bits::High => *to - (val << 8),
+            _ => *to - val,
+        };
+        *to = result;
+        print!("sub {}: {:#06x}->{:#06x} ", dest, *to, result);
+
+        self.set_flags(result);
+        self.print_flags();
+    }
+    fn execute_cmp(&mut self, src: Location, dest: Location) {
+        let (val, to, w) = self.get_location(&src, &dest);
+        let result = match w {
+            Bits::High => *to - (val << 8),
+            _ => *to - val,
+        };
+        print!("cmp {}: {:#06x}->{:#06x} ", dest, *to, result);
+
+        self.set_flags(result);
+        self.print_flags();
+    }
+    fn set_flags(&mut self, result: u16) {
+        self.zf = result == 0;
+        self.sf = (result & 0x8000) > 0;
     }
     fn decode_register(&mut self, reg: &Register) -> (&mut u16, Bits) {
         match *reg {
@@ -105,5 +157,16 @@ impl Cpu {
         println!("ss: {:#04x} ({})", self.registers[7], self.registers[8]);
         println!("ds: {:#04x} ({})", self.registers[7], self.registers[9]);
         println!("es: {:#04x} ({})", self.registers[7], self.registers[10]);
+        self.print_flags();
+    }
+    pub fn print_flags(&self) {
+        print!("flags: ");
+        if self.zf {
+            print!("Z");
+        }
+        if self.sf {
+            print!("S");
+        }
+        println!();
     }
 }
