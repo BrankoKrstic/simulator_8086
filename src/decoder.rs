@@ -222,6 +222,9 @@ impl<T: BufRead + Seek> Codec<T> {
         let w = if b1 & 0b11 == 0b01 { 1 } else { 0 };
 
         let b2 = self.get_byte().unwrap();
+
+        println!("{:#010b} {:#010b}", b1, b2);
+
         let md = b2 >> 6;
         let rm = b2 & 0b111;
 

@@ -30,6 +30,8 @@ where
     instructions: Codec<T>,
     sf: bool,
     zf: bool,
+    pf: bool,
+    of: bool,
 }
 
 impl<T: BufRead + Seek> Cpu<T> {
@@ -39,6 +41,8 @@ impl<T: BufRead + Seek> Cpu<T> {
             instructions: Codec::new(instructions),
             sf: false,
             zf: false,
+            pf: false,
+            of: false,
         }
     }
     pub fn run(&mut self) {
@@ -102,35 +106,38 @@ impl<T: BufRead + Seek> Cpu<T> {
         *to = result;
         print!("add {}: {:#06x}->{:#06x} ", dest, *to, result);
 
+        self.of = result < *to;
         self.set_flags(result);
         self.print_flags();
     }
     fn execute_sub(&mut self, src: Location, dest: Location) {
         let (val, to, w) = self.get_location(&src, &dest);
-        let result = match w {
-            Bits::High => *to - (val << 8),
-            _ => *to - val,
+        let (result, overflowed) = match w {
+            Bits::High => to.overflowing_sub(val << 8),
+            _ => to.overflowing_sub(val),
         };
-        *to = result;
-        print!("sub {}: {:#06x}->{:#06x} ", dest, *to, result);
 
+        print!("sub {}: {:#06x}->{:#06x} ", dest, *to, result);
+        *to = result;
+        self.of = overflowed;
         self.set_flags(result);
         self.print_flags();
     }
     fn execute_cmp(&mut self, src: Location, dest: Location) {
         let (val, to, w) = self.get_location(&src, &dest);
-        let result = match w {
-            Bits::High => *to - (val << 8),
-            _ => *to - val,
+        let (result, overflowed) = match w {
+            Bits::High => to.overflowing_sub(val << 8),
+            _ => to.overflowing_sub(val),
         };
         print!("cmp {}: {:#06x}->{:#06x} ", dest, *to, result);
-
+        self.of = overflowed;
         self.set_flags(result);
         self.print_flags();
     }
     fn set_flags(&mut self, result: u16) {
         self.zf = result == 0;
         self.sf = (result & 0x8000) > 0;
+        self.pf = result.count_ones() % 2 == 0;
     }
     fn decode_register(&mut self, reg: &Register) -> (&mut u16, Bits) {
         match *reg {
@@ -183,12 +190,12 @@ impl<T: BufRead + Seek> Cpu<T> {
     fn execute_jump(&mut self, ty: JumpType, offset: i8) {
         println!("{} {}", ty, offset);
         let should_jump = match ty {
-            JumpType::Je => todo!(),
+            JumpType::Je => self.zf,
             JumpType::Jl => todo!(),
             JumpType::Jle => todo!(),
-            JumpType::Jb => todo!(),
+            JumpType::Jb => self.of,
             JumpType::Jbe => todo!(),
-            JumpType::Jp => todo!(),
+            JumpType::Jp => self.pf,
             JumpType::Jo => todo!(),
             JumpType::Js => todo!(),
             JumpType::Jne => !self.zf,
@@ -201,7 +208,11 @@ impl<T: BufRead + Seek> Cpu<T> {
             JumpType::Jns => todo!(),
             JumpType::Loop => todo!(),
             JumpType::Jnloopzs => todo!(),
-            JumpType::Loopnz => todo!(),
+            JumpType::Loopnz => {
+                self.registers[2] = self.registers[2].overflowing_sub(1).0;
+                self.zf = self.registers[2] == 0;
+                !self.zf
+            }
             JumpType::Jcxz => todo!(),
         };
         if should_jump {
