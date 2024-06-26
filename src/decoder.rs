@@ -31,7 +31,7 @@ impl<T: BufRead + Seek> Codec<T> {
 
     pub fn jump(&mut self, bytes: i8) {
         let pos = SeekFrom::Current(bytes as i64);
-        let new_pos = self.source.seek(pos).unwrap();
+        self.source.seek(pos).unwrap();
     }
 
     pub fn next_op(&mut self) -> Option<Instruction> {
