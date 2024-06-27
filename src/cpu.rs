@@ -2,7 +2,7 @@ use std::io::{BufRead, Seek};
 
 use crate::{
     decoder::Codec,
-    instruction::{Instruction, JumpType, Location, Register},
+    instruction::{Instruction, JumpType, Location, Memory, Register},
 };
 
 enum Bits {
@@ -28,6 +28,7 @@ where
     /// 10: es
     registers: [u16; 11],
     instructions: Codec<T>,
+    memory: [u8; 1 << 16],
     sf: bool,
     zf: bool,
     pf: bool,
@@ -39,6 +40,7 @@ impl<T: BufRead + Seek> Cpu<T> {
         Self {
             registers: [0; 11],
             instructions: Codec::new(instructions),
+            memory: [0; 1 << 16],
             sf: false,
             zf: false,
             pf: false,
@@ -65,7 +67,7 @@ impl<T: BufRead + Seek> Cpu<T> {
             Instruction::Dec(_, _) => todo!(),
         }
     }
-    fn get_location(&mut self, src: &Location, dest: &Location) -> (u16, &mut u16, Bits) {
+    fn get_location<'a>(&'a mut self, src: &Location, dest: &Location) -> (u16, &'a mut u16, Bits) {
         let val = match src {
             Location::Register(ref reg) => {
                 let (reg, w) = self.decode_register(reg);
@@ -76,12 +78,51 @@ impl<T: BufRead + Seek> Cpu<T> {
                     Bits::All => *reg,
                 }
             }
-            Location::Memory(_) => todo!(),
+            Location::Memory(Memory {
+                reg1,
+                reg2,
+                displacement,
+            }) => {
+                println!(
+                    "{} {} {}",
+                    displacement,
+                    self.memory[*displacement as usize],
+                    self.memory[*displacement as usize + 1]
+                );
+                let mut out = *displacement as u16;
+                if let Some(reg1) = &reg1 {
+                    let (val, _) = self.decode_register(reg1);
+                    out += *val;
+                }
+                if let Some(reg2) = &reg2 {
+                    let (val, _) = self.decode_register(reg2);
+                    out += *val;
+                }
+                u16::from_le_bytes([self.memory[out as usize], self.memory[out as usize + 1]])
+            }
             Location::Immediate(val) => val.data as u16,
         };
         let (mov_to, w) = match dest {
             Location::Register(ref reg) => self.decode_register(reg),
-            Location::Memory(_) => todo!(),
+            Location::Memory(Memory {
+                reg1,
+                reg2,
+                displacement,
+            }) => {
+                let mut out = *displacement as u16;
+                if let Some(reg1) = &reg1 {
+                    let (val, _) = self.decode_register(reg1);
+                    out += *val;
+                }
+                if let Some(reg2) = &reg2 {
+                    let (val, _) = self.decode_register(reg2);
+                    out += *val;
+                }
+                (
+                    unsafe { std::mem::transmute(&mut self.memory[out as usize]) },
+                    Bits::All,
+                )
+            }
             Location::Immediate(_) => unimplemented!(),
         };
         (val, mov_to, w)

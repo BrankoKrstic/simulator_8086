@@ -79,9 +79,9 @@ impl Register {
 
 #[derive(Debug)]
 pub struct Memory {
-    reg1: Option<Register>,
-    reg2: Option<Register>,
-    displacement: i16,
+    pub(crate) reg1: Option<Register>,
+    pub(crate) reg2: Option<Register>,
+    pub(crate) displacement: i16,
 }
 
 impl Memory {
