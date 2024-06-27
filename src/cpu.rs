@@ -1,4 +1,4 @@
-use std::io::{BufRead, Seek};
+use std::io::{self, BufRead, Read, Seek, Write};
 
 use crate::{
     decoder::Codec,
@@ -246,7 +246,11 @@ impl<T: BufRead + Seek> Cpu<T> {
             JumpType::Jnp => todo!(),
             JumpType::Jno => todo!(),
             JumpType::Jns => todo!(),
-            JumpType::Loop => todo!(),
+            JumpType::Loop => {
+                self.registers[2] = self.registers[2].overflowing_sub(1).0;
+                self.zf = self.registers[2] == 0;
+                self.zf
+            }
             JumpType::Jnloopzs => todo!(),
             JumpType::Loopnz => {
                 self.registers[2] = self.registers[2].overflowing_sub(1).0;
@@ -258,5 +262,8 @@ impl<T: BufRead + Seek> Cpu<T> {
         if should_jump {
             self.instructions.jump(offset);
         }
+    }
+    pub fn dump_memory(&self, out: &mut impl Write) -> Result<(), io::Error> {
+        out.write_all(&self.memory[..])
     }
 }

@@ -1,4 +1,8 @@
-use std::{fs::File, io::BufReader, path::Path};
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::Path,
+};
 
 use simulator_8086::cpu::Cpu;
 
@@ -17,6 +21,10 @@ fn run(path: impl AsRef<Path>) -> Result<(), std::io::Error> {
     cpu.run();
 
     cpu.print_registers();
+
+    let mut file = BufWriter::new(File::create("output.data")?);
+
+    cpu.dump_memory(&mut file)?;
 
     Ok(())
 }
